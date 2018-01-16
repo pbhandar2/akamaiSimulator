@@ -1,0 +1,16 @@
+usage: ./akamaiSimulatorBin -c config -s size -t traceType -o outputFolder -b boundary (optional) -d
+
+
+config file is a list of traces
+
+size is L1 + L2 cache size
+
+traceType is a number of version of akamaiTrace, current version is 3 (the sixth col is request, the first column is time)
+
+outputFolder is the path for output, output format
+Layer:         reqCount, hitCount, layerOverallHitRatio, *perSeverLayerHitRatio
+Server:        overallReqCount, overallHitCount, overallHitRatio, layerSize, layerReqCount, layerHitCount, layerHitRatio
+akamaiStat:     overallAvgLatency, avgLayer1HitRatio, avgLayer2HitRatio, trafficToOrigin, trafficBetweenLayers
+
+boundary is the specified boundary between L1 and L2, 0.2 means sizeL1=0.2*size, sizeL2=0.8*size
+-d is to turn on dynamic boundary

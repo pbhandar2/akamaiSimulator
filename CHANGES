@@ -1,0 +1,2 @@
+Jan. 12, 2018	Dependency change 
+Now akamaiSimulator directly depends on CMimircache, originally it depends on mimircache, which is a mix of PyMimircache and CMimircache. CMimircache currently works a submodule of akamaiSimulator, any change to it should also be reflected to PyMimircache to guarantee consistent behavior. 
