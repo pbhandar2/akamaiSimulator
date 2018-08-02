@@ -176,7 +176,6 @@ namespace akamaiSimulator {
 
         this->ts[layer_id-1] ++;
 
-    
         /** now check whether need to recalculate boundary, 
          *  if yes, how to shift the boundary */
         bool need_to_adjust = true;
@@ -396,6 +395,10 @@ namespace akamaiSimulator {
             delete [] this->rd_count_array[i];
         }
     }
+
+    unsigned long long** cacheProfiler::get_rd_count_array() {
+      return this->rd_count_array;
+    }
     
     
     
@@ -416,8 +419,25 @@ namespace akamaiSimulator {
                              void *params,
                              const std::string server_name){
         
-        
+        /*
+          splay tree to keep track of every request to this particular cache server. 
+        */
+
         unsigned long i;
+        this->splay_tree = NULL;
+        this->hashtable = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                    (GDestroyNotify)simple_g_key_value_destroyer,
+                    (GDestroyNotify)simple_g_key_value_destroyer);
+        this->ts= 0;
+
+        // initiating array with all zero and then assigning them 
+        // rd_count_arary keeps track of L1 hits at reuse dist x and L2 tracks the 
+        // possible L2 hits for each L1 hit at reuse dist x
+        long long rd_count[size+ 3] = {};
+        long long possible_l2hits[size+3] = {};
+        this->rd_count_array= rd_count;
+        this->possible_l2hits = possible_l2hits;
+
 
         this->dynamic_boundary_flag = dynamic_boundary_flag;
         this->cache_server_id = server_id;
@@ -472,7 +492,16 @@ namespace akamaiSimulator {
         this->cache_server_name = server_name;
         this->set_caches(caches);
         this->akamai_stat = akamai_stat;
-        
+        this->splay_tree = NULL;
+        this->hashtable = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                    (GDestroyNotify)simple_g_key_value_destroyer,
+                    (GDestroyNotify)simple_g_key_value_destroyer);
+        this->ts= 0;
+        long long rd_count[this->cache_size+ 3] = {};
+        long long possible_l2hits[this->cache_size+3] = {};
+        this->rd_count_array= rd_count;
+        this->possible_l2hits = possible_l2hits;
+
         if (dynamic_boundary_flag)
             this->cache_profiler = new cacheProfiler(this->cache_size,
                                                      this->caches[0]->core->data_type,
@@ -590,11 +619,33 @@ namespace akamaiSimulator {
      */
     bool cacheServer::add_request(const cache_line_t *const cp,
                                   const unsigned long layer_id){
-            
-        
+
         /* log server stat */
         this->server_stat->num_req_per_layer[layer_id-1] ++;
         this->server_stat->num_req ++;
+
+        long long reuse_dist;
+
+        this->mtx_splay.lock();
+
+        /* find out the reuse distance of current request, and add to couter */
+        this->splay_tree =
+            this->process_one_element(cp, this->splay_tree,
+                                      this->hashtable,
+                                      this->ts, &reuse_dist);
+        if (reuse_dist == -1) {
+          (this->rd_count_array[this->cache_size+1]) ++;
+        }            
+        else if (reuse_dist > (long long) (this->cache_size)) {
+          this->rd_count_array[this->cache_size+2] += 1;
+        }
+        else {
+          this->rd_count_array[reuse_dist] += 1;
+        }
+            
+        this->ts++;
+
+        this->mtx_splay.unlock();
         
         /* also write stat into akamaiStat */
         this->akamai_stat->req[layer_id-1]++;
@@ -602,9 +653,11 @@ namespace akamaiSimulator {
         if (this->dynamic_boundary_flag) {
             this->mtx_layer_size.lock();
         }
+
         bool hit = this->caches[0]->core->add_element(this->caches[layer_id-1],
                                                    (cache_line_t*) cp);
-        
+
+
         if (this->dynamic_boundary_flag) {
             this->mtx_layer_size.unlock();
         }
@@ -614,6 +667,14 @@ namespace akamaiSimulator {
             this->server_stat->num_hit ++;
             this->server_stat->num_hit_per_layer[layer_id-1] ++;
             this->akamai_stat->hit[layer_id-1]++; 
+            // if it is a hit in L1, we check if it would have been a hit in L2 as well
+            if (layer_id == 1) {
+              bool hit2 = this->caches[1]->core->check_element(this->caches[layer_id],
+                                             (cache_line_t*) cp);
+              if (hit2) {
+                this->possible_l2hits[reuse_dist] ++;
+              }
+            }
         }
         
         /* dynamic boundary */
@@ -677,14 +738,14 @@ namespace akamaiSimulator {
         return FALSE;
     }
     
-    
-    
     cacheServer::~cacheServer(){
         for (int i=0; i<NUM_CACHE_LAYERS; i++)
             this->caches[i]->core->destroy(this->caches[i]);
         delete this->server_stat;
         delete this->cache_profiler; 
     }
+
+
     
     
 }

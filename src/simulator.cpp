@@ -7,8 +7,6 @@
 //
 
 
-
-
 #include "simulator.hpp"
 #include <iostream>
 #include <vector>
@@ -66,6 +64,8 @@ namespace akamaiSimulator {
         
         unsigned int i;
         unsigned long num_servers = traces.size();
+
+        debug(" In akamai run ");
         
 #ifdef TIME_SYNCHRONIZATION
         info("time synchronization between layers are enabled, "
@@ -121,6 +121,7 @@ namespace akamaiSimulator {
             akamaiSimulator::cacheServer* cache_servers[num_servers];
             akamaiSimulator::cacheServerThread *cache_server_threads[num_servers];
             for (i=0; i<num_servers; i++){
+                debug( "initializing a cache server");
                 cache_servers[i] = new akamaiSimulator::cacheServer(i, akamai_stat,
                                                                     dynamic_boundary_flag,
                                                                     cache_sizes[i],
@@ -172,11 +173,23 @@ namespace akamaiSimulator {
             /* stop akamai_stat_log thread */
             thread_stop_flag = true;
             //        log_akamai_stat_thread.join();
-            
+
+            std::ofstream o("../output/data.out");
             
             /* print stat of cache server and free cache server */
             for (auto cache_server: cache_servers){
                 akamaiSimulator::cacheServer::print_stat(cache_server->server_stat);
+                long long* x = cache_server->rd_count_array;
+                long long* y = cache_server->possible_l2hits;
+                long long temp_rd;
+
+                for( int a = 0; a <= cache_server->cache_size; a = a + 1 ) {
+                    if (x[a] && y[a]) {
+                        float ratio = float(y[a])/float(x[a]);
+                        o <<a<<","<<x[a]<<","<<y[a]<<","<<ratio<<"\n"<<std::endl;
+                    }
+                }
+                
                 delete cache_server;
             }
             std::cout<<"\n";
@@ -186,6 +199,8 @@ namespace akamaiSimulator {
                 akamaiSimulator::cacheLayer::print_stat(cache_layer->layer_stat);
                 delete cache_layer;
             }
+
+            system("python3 ../scripts/line.py");
             
             
             /* free cacheServerThread and cacheLayerThread */

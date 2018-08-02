@@ -120,8 +120,8 @@ namespace akamaiSimulator {
          *  the last element of the array is cold miss count 
          *  the second to last is the count of req with 
          *  rd > max_cache_size */
-        unsigned long long *rd_count_array[NUM_CACHE_LAYERS];
-        unsigned long long rd_count_array_size[NUM_CACHE_LAYERS];
+        
+        
         
         double decay_coefficient; 
         unsigned long adjust_interval;
@@ -171,6 +171,9 @@ namespace akamaiSimulator {
          *  if return 0,  no change */
         int add_request(const cache_line_t* const cp,
                         const unsigned long layer_id);
+
+        unsigned long long *rd_count_array[NUM_CACHE_LAYERS];
+        unsigned long long rd_count_array_size[NUM_CACHE_LAYERS];
         
         
         
@@ -179,6 +182,8 @@ namespace akamaiSimulator {
         
         /* clear all data, begin fresh */
         void clear();
+
+        unsigned long long** get_rd_count_array();
         
         ~cacheProfiler();
         
@@ -210,7 +215,7 @@ namespace akamaiSimulator {
                                                  unsigned long ts,
                                                  long long* reuse_dist){
             gpointer gp;
-            
+            printf("\n inside process element \n");
             gp = g_hash_table_lookup(hash_table, cp->item_p);
             
             sTree* newtree;
@@ -262,10 +267,9 @@ namespace akamaiSimulator {
         
         /* related to dynamic boundary change */
         bool dynamic_boundary_flag;
-        cacheProfiler *cache_profiler;
         
         
-        unsigned long cache_size;
+        
 //        double boundaries[NUM_CACHE_LAYERS];                      // ATTENTION change boundary on cacheServer won't affect weight in consistentHashRing
         unsigned long layer_size[NUM_CACHE_LAYERS];
         cache_t *caches[NUM_CACHE_LAYERS];
@@ -274,14 +278,22 @@ namespace akamaiSimulator {
          *  current usage: prevent dynamic boundary size chage 
          *  from affecting adding requests */ 
         std::mutex mtx_layer_size;
+        std::mutex mtx_splay;
+        sTree* splay_tree;
+        GHashTable* hashtable;
+        unsigned long ts;
+        
         
         bool adjust_caches();
         
     public:
         cacheServerStat *server_stat;
         akamaiStat *akamai_stat;
+        cacheProfiler *cache_profiler;
+        long long* rd_count_array;
+        long long* possible_l2hits;
+        unsigned long cache_size;
 
-        
         cacheServer(const unsigned long id,
                     akamaiStat* const akamai_stat,
                     bool dynamic_boundary_flag,
@@ -369,6 +381,74 @@ namespace akamaiSimulator {
         
         static void print_stat(cacheServerStat* stat){
             std::cout << cacheServer::build_stat_str(stat);
+        }
+
+                /*-----------------------------------------------------------------------------
+         *
+         * process_one_element --
+         *      this function is used for computing reuse distance for each request
+         *      it maintains a hashmap and a splay tree,
+         *      time complexity is O(log(N)), N is the number of unique elements
+         *
+         *
+         * Input:
+         *      cp           the cache line struct contains input data (request label)
+         *      splay_tree   the splay tree struct
+         *      hash_table   hashtable for remember last request timestamp (virtual)
+         *      ts           current timestamp
+         *      reuse_dist   the calculated reuse distance
+         *
+         * Return:
+         *      splay tree struct pointer, because splay tree is modified every time,
+         *      so it is essential to update the splay tree
+         *
+         *-----------------------------------------------------------------------------
+         */
+        static inline sTree* process_one_element(const cache_line* const cp,
+                                                 sTree* splay_tree,
+                                                 GHashTable* hash_table,
+                                                 unsigned long ts,
+                                                 long long* reuse_dist){
+            gpointer gp;
+            //printf("\n inside process element \n");
+            gp = g_hash_table_lookup(hash_table, cp->item_p);
+            
+            sTree* newtree;
+            if (gp == NULL){
+                // first time access
+                newtree = insert(ts, splay_tree);
+                gint64 *value = g_new(gint64, 1);
+                if (value == NULL){
+                    error_msg("not enough memory\n");
+                    abort();
+                }
+                *value = ts;
+                if (cp->type == 'c')
+                    g_hash_table_insert(hash_table, g_strdup((gchar*)(cp->item_p)), (gpointer)value);
+                
+                else if (cp->type == 'l'){
+                    gint64* key = g_new(gint64, 1);
+                    *key = *(guint64*)(cp->item_p);
+                    g_hash_table_insert(hash_table, (gpointer)(key), (gpointer)value);
+                }
+                else{
+                    error_msg("unknown cache line content type: %c\n", cp->type);
+                    abort();
+                }
+                *reuse_dist = -1;
+            }
+            else{
+                // not first time access
+                guint64 old_ts = *(guint64*)gp;
+                newtree = splay(old_ts, splay_tree);
+                *reuse_dist = node_value(newtree->right);
+                *(guint64*)gp = ts;
+                
+                newtree = splay_delete(old_ts, newtree);
+                newtree = insert(ts, newtree);
+                
+            }
+            return newtree;
         }
         
 

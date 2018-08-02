@@ -69,6 +69,8 @@ namespace akamaiSimulator {
             
             read_one_element(this->trace_reader, cp);
             while (cp->valid) {
+
+                //debug("cp is valid");
                 
 //                printf("req %s\n", cp->item_p);
 //                if (cp->ts > 9600)
