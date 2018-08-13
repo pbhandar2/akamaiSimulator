@@ -9,3 +9,4 @@ new*.*
 akamai.*
 test.c
 build
+output/
